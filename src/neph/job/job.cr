@@ -1,3 +1,6 @@
+require "redis"
+require "uuid"
+
 module Neph
   class Job
     TICK_CHARS = "⠁⠁⠉⠙⠚⠒⠂⠂⠒⠲⠴⠤⠄⠄⠤⠠⠠⠤⠦⠖⠒⠐⠐⠒⠓⠋⠉⠈⠈ "
@@ -25,6 +28,7 @@ module Neph
     property src : Array(String) = [] of String
     property ignore_error : Bool = false
     property hide : Bool = false
+    property redis : Redis | Nil
 
     def initialize(
          @name       : String,
@@ -42,6 +46,11 @@ module Neph
       @prev_status = -1
       @prev_command = ""
       @elapsed_time = ""
+      
+      redis_url = ENV.fetch("NEPH_REDIS", "")
+      unless redis_url.size == 0
+        @redis = Redis.new(url: redis_url)
+      end
     end
 
     def add_sub_job(job : Job, env : String?)
@@ -267,19 +276,24 @@ module Neph
     end
 
     def exec_self
-      stdout = File.open("#{@log_dir}/#{log_out}", "w")
-      stderr = File.open("#{@log_dir}/#{log_err}", "w")
+      start_time = Time.local
 
-      s = Time.local
-
+      if ENV.has_key?("NEPH_REDIS")
+        stdout = IO::Memory.new
+        stderr = IO::Memory.new
+      else
+        stdout = File.open("#{@log_dir}/#{log_out}", "w")
+        stderr = File.open("#{@log_dir}/#{log_err}", "w")
+      end
+    
       exec_commands(@before, stdout, stderr)
       exec_commands(@commands, stdout, stderr)
       exec_commands(@after, stdout, stderr)
 
       @done_command += 1
 
-      e = Time.local
-      @elapsed_time = format_time(e - s)
+      end_time = Time.local
+      @elapsed_time = format_time(end_time - start_time)
       stdout.close
       stderr.close
     end
@@ -309,6 +323,11 @@ module Neph
         commands.each do |command|
           next if command.empty?
 
+          if ENV.has_key?("NEPH_REDIS")
+            stdout.as(IO::Memory).clear
+            stderr.as(IO::Memory).clear
+          end
+
           @current_command = command
           process = Process.run(
             @current_command,
@@ -317,6 +336,21 @@ module Neph
             error: stderr,
             chdir: @dir
           )
+
+          if ENV.has_key?("NEPH_REDIS")
+            run_id = ENV.fetch("NEPH_RUN_ID", UUID.random.to_s[0, 8])
+            redis_key = "neph:#{run_id}:#{name}"
+
+            unless stdout.as(IO::Memory).size == 0
+              log_record = {"type": "stdout", "content": stdout.to_s, "timestamp": Time.local}
+              @redis.as(Redis).lpush(redis_key, log_record.to_s)
+            end
+
+            unless stderr.as(IO::Memory).size == 0
+              log_record = {"type": "stderr", "content": stderr.to_s, "timestamp": Time.local}
+              @redis.as(Redis).lpush(redis_key, log_record.to_s)
+            end
+          end
 
           @done_command += 1
           unless process.exit_status == 0

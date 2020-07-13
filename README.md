@@ -75,6 +75,15 @@ Neph is used in [which_is_the_fastest](https://github.com/tbrand/which_is_the_fa
 The build time is **reduced from 102[sec] to 33[sec]**.  
 The [neph.yaml](https://github.com/tbrand/which_is_the_fastest/blob/master/neph.yaml) is here.
 
+## Log into redis
+
+To save logs into redis instead of the filesystem do the following:
+- export `NEPH_REDIS=redis://<redis_host>:<redis_port>` environment variable.
+- export `NEPH_RUN_ID=<unique id for this run>` environment variable.
+
+the logs of this run will be stored in redis as a list with key: `neph:<run_id>:<job_name>`
+
+
 ## Contributing
 
 1. Fork it ( https://github.com/tbrand/neph/fork )
