@@ -1,5 +1,6 @@
 require "redis"
 require "uuid"
+require "json"
 
 module Neph
   class Job
@@ -341,14 +342,17 @@ module Neph
             run_id = ENV.fetch("NEPH_RUN_ID", UUID.random.to_s[0, 8])
             redis_key = "neph:#{run_id}:#{name}"
 
+            log_record = Hash{String => String}
+            timestamp = Time.local.to_s
+
             unless stdout.as(IO::Memory).size == 0
-              log_record = {"type": "stdout", "content": stdout.to_s, "timestamp": Time.local}
-              @redis.as(Redis).lpush(redis_key, log_record.to_s)
+              log_record = {"type" => "stdout", "content" => stdout.to_s, "timestamp" => timestamp}
+              @redis.as(Redis).rpush(redis_key, log_record.to_json)
             end
 
             unless stderr.as(IO::Memory).size == 0
-              log_record = {"type": "stderr", "content": stderr.to_s, "timestamp": Time.local}
-              @redis.as(Redis).lpush(redis_key, log_record.to_s)
+              log_record = {"type"=> "stderr", "content" => stderr.to_s, "timestamp" => timestamp}
+              @redis.as(Redis).rpush(redis_key, log_record.to_json)
             end
           end
 
